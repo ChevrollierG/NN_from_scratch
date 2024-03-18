@@ -26,20 +26,22 @@ class Conv2D(Layer):
     def __init__(self, data_depth, kernel_depth, kernel_size):
         self.weights = []
         for i in range(kernel_depth):
-            self.weights.append(np.array([np.array([np.array([random.random() for j in range(data_depth)]) for k in range(kernel_size)]) for l in range(kernel_size)]))
+            self.weights.append(np.array([np.array([np.array([round(random.random(), 2) for j in range(kernel_size)]) for k in range(kernel_size)]) for l in range(data_depth)]))
         self.weights = np.array(self.weights)
                 
     def forward(self, in_data):
-        result = np.array([np.array([np.zeros(len(self.weights)) for j in range(np.shape(in_data)[1])]) for i in range(np.shape(in_data)[0])])
-        print("taille", np.shape(result))
+        result = np.zeros((np.shape(self.weights)[0], np.shape(in_data)[1], np.shape(in_data)[2]))
         padding = 1
         self.in_data = in_data
-        result = np.array(convolution(in_data, self.weights, padding))
+        for i in range(len(self.weights)):
+            for j in range(len(self.weights[i])):
+                result[i] += np.array(convolution(in_data[j], self.weights[i][j], padding))
+        print(result)
         return result
     
     def backward(self, gradient, lr):
-        weights_gradient = np.array([np.array([np.zeros((len(self.weights[i][j]),len(self.weights[i][j]))) for j in range(len(self.weights[i]))]) for i in range(len(self.weights))])
-        input_gradient = np.array([np.zeros((len(self.in_data[i]),len(self.in_data[i][0]))) for i in range(len(self.in_data))])
+        weights_gradient = np.zeros(np.shape(self.weights))
+        input_gradient = np.zeros(np.shape(self.in_data))
         
         for i in range(len(self.weights)):
             for j in range(len(self.weights[i])):
@@ -175,11 +177,33 @@ class Flatten(Layer):
     
 class Dense(Layer):
     def __init__(self, nb_neurons, input_size):
-        self.weights = np.array([])
-        self.bias = np.array([])
+        self.weights = []
+        self.bias = []
         for i in range(nb_neurons):
-            np.append(self.weights, np.array([random.random() for j in range(input_size)]))
-            np.append(self.bias, random.random())
+            self.weights.append(np.array([round(random.random(), 2) for j in range(input_size)]))
+            self.bias.append(round(random.random(), 2))
+    
+    def forward(self, in_data):
+        result = []
+        self.in_data = in_data
+        for i in range(len(self.weights)):
+            result.append(self.bias[i])
+            for j in range(len(self.weights[i])):
+                result[i] += self.weights[i][j] * in_data[j]
+        return result
+    
+    def backward(self, gradient, lr):
+        weights_gradient = np.dot(gradient, self.in_data)
+        input_gradient = np.dot(gradient, self.weights)
+        
+        self.weights -= lr * weights_gradient
+        self.bias -= lr * np.array(gradient)
+        
+        return input_gradient
+    
+class BatchNormalization(Layer):
+    def __init__(self):
+        pass
     
     def forward(self, in_data):
         result = []
@@ -220,19 +244,27 @@ def rotate180(data):
     return result
 
 def convolution(data, kernel, padding):
-    result = np.array([np.array([np.zeros(len(kernel)) for j in range(np.shape(data)[1])]) for i in range(np.shape(data)[0])])
+    result = np.zeros(np.shape(data))
     for i in range(0, len(data)+2*padding):
         if((len(data) + 2*padding - i) >= len(kernel)):
             for j in range(0, len(data[i])+2*padding):
                 if((len(data[i]) + 2*padding - j) >= len(kernel)):
-                    for y in range(len(data[i][j])):
-                        for z in range(len(kernel)):
-                            for k in range(len(kernel[z])):
-                                if(i-padding+k >= 0 and i-padding+k <= len(data)-1):
-                                    for l in range(len(kernel[z][k])):
-                                        if(j-padding+l >= 0 and j-padding+l <= len(data[i])-1):
-                                            result[i][j][z] += kernel[z][k][l][y] * data[i - padding + k][j - padding + l][y]
+                    for k in range(len(kernel)):
+                        if(i-padding+k >= 0 and i-padding+k <= len(data)-1):
+                            for l in range(len(kernel[k])):
+                                if(j-padding+l >= 0 and j-padding+l <= len(data[i])-1):
+                                    result[i][j] += kernel[k][l] * data[i - padding + k][j - padding + l]
     return result
+
+def reshape_images(data):
+    result = np.zeros((np.shape(data)[0], np.shape(data)[3], np.shape(data)[1], np.shape(data)[2]))
+    for i in range(len(data)):
+        for j in range(len(data[i])):
+            for k in range(len(data[i][j])):
+                for l in range(len(data[i][j][k])):
+                    result[i][l][j][k] += round(data[i][j][k][l] / 255.0, 2)
+    return result
+            
 
 def dataset(count):
     (Xtrain, Ytrain), (Xtest, Ytest) = cifar10.load_data()
@@ -244,17 +276,17 @@ def dataset(count):
     
     
 def model(input_depth, y_size):
-    result = [Conv2D(input_depth, 16, 3),
+    result = [Conv2D(input_depth, 5, 3),
               ReLu(),
               MaxPooling(2),
-              Conv2D(32, 32, 3),
+              Conv2D(5, 5, 3),
               ReLu(),
               MaxPooling(2),
-              Conv2D(32, 32, 3),
+              Conv2D(5, 5, 3),
               ReLu(),
               MaxPooling(2),
               Flatten(),
-              Dense(y_size, 1024),
+              Dense(10, 80),
               SoftMax()]
     return result
 
@@ -268,9 +300,8 @@ def train_model(data_X, data_Y, model):
             input_data = data_X[i]
             for k in range(len(model)):
                 input_data = model[k].forward(input_data)
-                print(np.shape(input_data))
-            
-            print(len(input_data), len(data_Y[j]))
+                #print(input_data[0])
+                
             error += CrossEntropyLoss(input_data, data_Y[j])
             gradient = CrossEntropyLoss_prime(input_data, data_Y[j])
             
@@ -280,12 +311,16 @@ def train_model(data_X, data_Y, model):
         print("Epoch: ", i, ", Loss: ", error)
         
     return model
-                
-    
+
+
 
 if __name__ == '__main__':
-    (Xtrain, Ytrain), (Xtest, Ytest) = dataset(10)
+    dataset_size = 10
+    nb_class = 10
+    image_type = 3
+    (Xtrain, Ytrain), (Xtest, Ytest) = dataset(dataset_size)
     print("Dataset loaded")
-    model = model(3, 10)
+    Xtrain = reshape_images(Xtrain)
+    model = model(image_type, nb_class)
     model = train_model(Xtrain, Ytrain, model)
     
